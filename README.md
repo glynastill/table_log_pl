@@ -1,7 +1,7 @@
 table_log_pl
 ===========
 
-Attempt at pl/pgsql drop-in replacement for te dated table_log C extenstion
+Attempt at pl/pgsql drop-in replacement for the dated table_log C extenstion
 AKA pg Table Audit / PostgreSQL Table Log / tablelog by Andreas Scherbaum:
      http://www.postgresql.org/ftp/projects/pgFoundry/tablelog/tablelog/
      http://github.com/andreasscherbaum/table_log
