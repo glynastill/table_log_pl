@@ -1,0 +1,3 @@
+comment = 'pl/pgsql implementation for table_log: an extension to log table changes in PostgreSQL'
+default_version = '0.1'
+relocatable = true
