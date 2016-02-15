@@ -17,14 +17,12 @@
 --     http://8kb.co.uk/blog/2015/01/19/copying-pavel-stehules-simple-history-table-but-with-the-jsonb-type/
 --     https://github.com/2ndQuadrant/pgaudit
 
-SET search_path TO public;
 
---
+-- drop old function
 DROP FUNCTION IF EXISTS table_log_pl (); -- ignore any error (but do not CASCADE)
-DROP FUNCTION IF EXISTS table_log_pl_restore_table(varchar, varchar, char, char, char, timestamptz, char, int, int, varchar, varchar);
+DROP FUNCTION IF EXISTS table_log_restore_table_pl(varchar, varchar, char, char, char, timestamptz, char, int, int, varchar, varchar);
 
---
-
+-- Table_log plpgsql function; there's better ways to do this, but this is a drop in replacement for table_log C functions.
 CREATE OR REPLACE FUNCTION table_log_pl() RETURNS TRIGGER AS
 $BODY$
 DECLARE
@@ -39,7 +37,7 @@ DECLARE
     v_sql text;
     v_col_cache text;
     v_enable_cache boolean := true;
-    v_enable_prepare boolean := false;
+    v_enable_prepare boolean := true;
     v_tmp text;
     v_i int;
 
@@ -199,9 +197,7 @@ END;
 $BODY$
 LANGUAGE plpgsql VOLATILE;
 
---
-
-CREATE OR REPLACE FUNCTION table_log_pl_restore_table (origtab varchar, origtab_pk varchar, logtab char, logtab_pk char, restoretab char, to_timestamp timestamptz, search_pk char DEFAULT NULL, method int DEFAULT 0, not_temporarly int DEFAULT 0, origtab_schema varchar DEFAULT NULL, logtab_schema varchar DEFAULT NULL) RETURNS varchar AS
+CREATE OR REPLACE FUNCTION table_log_restore_table_pl (origtab varchar, origtab_pk varchar, logtab char, logtab_pk char, restoretab char, to_timestamp timestamptz, search_pk char DEFAULT NULL, method int DEFAULT 0, not_temporarly int DEFAULT 0, origtab_schema varchar DEFAULT NULL, logtab_schema varchar DEFAULT NULL) RETURNS varchar AS
 $BODY$
 DECLARE
     v_origtab_cols int;
@@ -397,43 +393,3 @@ BEGIN
 END;
 $BODY$
 LANGUAGE plpgsql VOLATILE;
-
--- tests
-
--- drop old trigger
-DROP TRIGGER test_log_chg ON test; -- ignore any error
-
--- create demo table
-DROP TABLE test; -- ignore any error
-CREATE TABLE test (
-  id                    INT                 NOT NULL
-                                            PRIMARY KEY,
-  name                  VARCHAR(20)         NOT NULL
-);
-
--- create the table without data from demo table
-DROP TABLE test_log; -- ignore any error
-SELECT * INTO test_log FROM test LIMIT 0;
-ALTER TABLE test_log ADD COLUMN trigger_mode VARCHAR(10);
-ALTER TABLE test_log ADD COLUMN trigger_tuple VARCHAR(5);
-ALTER TABLE test_log ADD COLUMN trigger_changed TIMESTAMPTZ;
-ALTER TABLE test_log ADD COLUMN trigger_id BIGINT;
-CREATE SEQUENCE test_log_id;
-SELECT SETVAL('test_log_id', 1, FALSE);
-ALTER TABLE test_log ALTER COLUMN trigger_id SET DEFAULT NEXTVAL('test_log_id');
-
--- create trigger
-CREATE TRIGGER test_log_chg AFTER UPDATE OR INSERT OR DELETE ON test FOR EACH ROW
-               EXECUTE PROCEDURE table_log_pl();
-
--- test trigger
-INSERT INTO test VALUES (1, 'name');
-SELECT * FROM test;
-SELECT * FROM test_log;
-UPDATE test SET name='other name' WHERE id=1;
-SELECT * FROM test;
-SELECT * FROM test_log;
-
--- create restore table
-SELECT table_log_pl_restore_table('test', 'id', 'test_log', 'trigger_id', 'test_recover', NOW());
-SELECT * FROM test_recover;

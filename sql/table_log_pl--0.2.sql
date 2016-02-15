@@ -17,11 +17,8 @@
 --     http://8kb.co.uk/blog/2015/01/19/copying-pavel-stehules-simple-history-table-but-with-the-jsonb-type/
 --     https://github.com/2ndQuadrant/pgaudit
 
-SET search_path TO public;
-
---
-DROP FUNCTION IF EXISTS table_log_pl (); -- ignore any error (but do not CASCADE)
-DROP FUNCTION IF EXISTS table_log_pl_restore_table(varchar, varchar, char, char, char, timestamptz, char, int, int, varchar, varchar);
+-- complain if script is sourced in psql, rather than via CREATE EXTENSION
+\echo Use "CREATE EXTENSION table_log_pl" to load this file. \quit
 
 --
 
@@ -398,42 +395,85 @@ END;
 $BODY$
 LANGUAGE plpgsql VOLATILE;
 
--- tests
+--
 
--- drop old trigger
-DROP TRIGGER test_log_chg ON test; -- ignore any error
+CREATE OR REPLACE FUNCTION table_log_pl_init(level int, orig_schema text, orig_name text, log_schema text, log_name text) 
+RETURNS void AS 
+$BODY$
+DECLARE
+    do_log_user  int = 0;
+    level_create text = E'''';
+    orig_qq      text;
+    log_qq       text;
+BEGIN
+    -- Quoted qualified names
+    orig_qq := quote_ident(orig_schema)||'.'||quote_ident(orig_name);
+    log_qq := quote_ident(log_schema)||'.'||quote_ident(log_name);
 
--- create demo table
-DROP TABLE test; -- ignore any error
-CREATE TABLE test (
-  id                    INT                 NOT NULL
-                                            PRIMARY KEY,
-  name                  VARCHAR(20)         NOT NULL
-);
+    IF level <> 3 THEN
+        level_create := level_create
+            ||', trigger_id BIGSERIAL NOT NULL PRIMARY KEY';
+        IF level <> 4 THEN
+            level_create := level_create
+                ||', trigger_user VARCHAR(32) NOT NULL';
+            do_log_user := 1;
+            IF level <> 5 THEN
+                RAISE EXCEPTION 
+                    'table_log_pl_init: First arg has to be 3, 4 or 5.';
+            END IF;
+        END IF;
+    END IF;
+    
+    EXECUTE 'CREATE TABLE '||log_qq
+          ||'(LIKE '||orig_qq
+          ||', trigger_mode VARCHAR(10) NOT NULL'
+          ||', trigger_tuple VARCHAR(5) NOT NULL'
+          ||', trigger_changed TIMESTAMPTZ NOT NULL'
+          ||level_create
+          ||')';
+            
+    EXECUTE 'CREATE TRIGGER "table_log_trigger_pl" AFTER UPDATE OR INSERT OR DELETE ON '
+          ||orig_qq||' FOR EACH ROW EXECUTE PROCEDURE table_log_pl('
+          ||quote_literal(log_name)||','
+          ||do_log_user||','
+          ||quote_literal(log_schema)||')';
 
--- create the table without data from demo table
-DROP TABLE test_log; -- ignore any error
-SELECT * INTO test_log FROM test LIMIT 0;
-ALTER TABLE test_log ADD COLUMN trigger_mode VARCHAR(10);
-ALTER TABLE test_log ADD COLUMN trigger_tuple VARCHAR(5);
-ALTER TABLE test_log ADD COLUMN trigger_changed TIMESTAMPTZ;
-ALTER TABLE test_log ADD COLUMN trigger_id BIGINT;
-CREATE SEQUENCE test_log_id;
-SELECT SETVAL('test_log_id', 1, FALSE);
-ALTER TABLE test_log ALTER COLUMN trigger_id SET DEFAULT NEXTVAL('test_log_id');
+    RETURN;
+END;
+$BODY$
+LANGUAGE plpgsql;
 
--- create trigger
-CREATE TRIGGER test_log_chg AFTER UPDATE OR INSERT OR DELETE ON test FOR EACH ROW
-               EXECUTE PROCEDURE table_log_pl();
+CREATE OR REPLACE FUNCTION table_log_pl_init(level int, orig_name text) 
+RETURNS void AS 
 
--- test trigger
-INSERT INTO test VALUES (1, 'name');
-SELECT * FROM test;
-SELECT * FROM test_log;
-UPDATE test SET name='other name' WHERE id=1;
-SELECT * FROM test;
-SELECT * FROM test_log;
+$BODY$
+BEGIN
+    PERFORM table_log_pl_init(level, orig_name, current_schema());
+    RETURN;
+END;
+$BODY$
+LANGUAGE plpgsql;
 
--- create restore table
-SELECT table_log_pl_restore_table('test', 'id', 'test_log', 'trigger_id', 'test_recover', NOW());
-SELECT * FROM test_recover;
+
+CREATE OR REPLACE FUNCTION table_log_pl_init(level int, orig_name text, log_schema text) 
+RETURNS void AS 
+$BODY$
+BEGIN
+    PERFORM table_log_pl_init(level, current_schema(), orig_name, log_schema);
+    RETURN;
+END;
+$BODY$
+LANGUAGE plpgsql;
+
+
+CREATE OR REPLACE FUNCTION table_log_pl_init(level int, orig_schema text, orig_name text, log_schema text) 
+RETURNS void AS 
+$BODY$
+BEGIN
+    PERFORM table_log_pl_init(level, orig_schema, orig_name, log_schema,
+        CASE WHEN orig_schema=log_schema 
+            THEN orig_name||'_log' ELSE orig_name END);
+    RETURN;
+END;
+$BODY$
+LANGUAGE plpgsql;
