@@ -342,7 +342,7 @@ RETURNS void AS
 $BODY$
 DECLARE
     do_log_user  int = 0;
-    level_create text = E'''';
+    level_create text = E'';
     orig_qq      text;
     log_qq       text;
 BEGIN
